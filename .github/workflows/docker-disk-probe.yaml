@@ -1,0 +1,193 @@
+# Copyright (c) 2026 Project CHIP Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Measures how far a full docker image build gets on a given runner before it
+# runs out of disk, and what each image costs.
+#
+# This exists to answer #30750 with data rather than estimates. It never pushes
+# and is never triggered automatically on master.
+
+name: Docker image disk probe
+
+on:
+    workflow_dispatch:
+        inputs:
+            runner:
+                description: "Runner to probe"
+                type: choice
+                default: "ubuntu-latest"
+                options:
+                    - "ubuntu-latest"
+                    - "ubuntu-24.04-arm"
+                    - "namespace-profile-4x16"
+                    - "namespace-profile-16x32"
+            path:
+                description: "Sub-path under integrations/docker/images (e.g. 'stage-2/*')"
+                default: "*"
+            clear:
+                description: "docker rmi each image after building it"
+                type: boolean
+                default: false
+            skip_vscode:
+                description: "Skip chip-build-vscode (the 55GB aggregator)"
+                type: boolean
+                default: false
+            local_version:
+                description: "Tag everything with a run-unique version, so no parent can come from the registry"
+                type: boolean
+                default: false
+    push:
+        branches:
+            - "dcj/docker-disk-probe"
+
+jobs:
+    probe:
+        name: Probe disk usage across all images
+        runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
+        timeout-minutes: 350
+        steps:
+            - name: Checkout
+              uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+            - name: Runner disk inventory
+              run: |
+                  echo "runner: ${{ inputs.runner || 'ubuntu-latest' }}"
+                  echo "arch:   $(uname -m)"
+                  echo "cpus:   $(nproc)"
+                  echo "mem:    $(free -h | awk 'NR==2{print $2}')"
+                  echo
+                  df -h
+                  echo
+                  echo "docker data root: $(docker info --format '{{.DockerRootDir}}')"
+                  docker system df
+
+            - name: Build every image, recording disk after each
+              env:
+                  SUB_PATH: ${{ inputs.path || '*' }}
+                  CLEAR: ${{ inputs.clear && '--clear' || '' }}
+                  SKIP_VSCODE: ${{ inputs.skip_vscode }}
+                  # Empty means "use each image's own version file", which lets a
+                  # parent come from ghcr.io if it was not built earlier in this job.
+                  DOCKER_BUILD_VERSION: ${{ inputs.local_version && format('probe-{0}', github.run_id) || '' }}
+              run: |
+                  set -uo pipefail
+
+                  ROOT="$(git rev-parse --show-toplevel)"
+                  LOGDIR="$RUNNER_TEMP/probe-logs"
+                  RESULTS="$RUNNER_TEMP/results.tsv"
+                  mkdir -p "$LOGDIR"
+                  : >"$RESULTS"
+
+                  # Docker's data root is what actually fills up; measure that
+                  # filesystem rather than assuming it is /.
+                  DOCKER_ROOT="$(docker info --format '{{.DockerRootDir}}')"
+                  avail_mb() { df -BM --output=avail "$DOCKER_ROOT" | tail -1 | tr -dc '0-9'; }
+                  used_mb() { df -BM --output=used "$DOCKER_ROOT" | tail -1 | tr -dc '0-9'; }
+
+                  START_AVAIL=$(avail_mb)
+                  echo "Starting available on $DOCKER_ROOT: ${START_AVAIL} MB"
+
+                  # Same enumeration and ordering that build-all.sh uses.
+                  mapfile -t DOCKERFILES < <(
+                      find "$ROOT/integrations/docker/images"/$SUB_PATH \
+                          -name Dockerfile ! -path "*chip-cert-bins/*" | sort
+                  )
+                  echo "Found ${#DOCKERFILES[@]} images"
+
+                  FIRST_DISK_FAILURE=""
+
+                  for dockerfile in "${DOCKERFILES[@]}"; do
+                      dir="$(dirname "$dockerfile")"
+                      name="${dir##*/}"
+
+                      if [[ $SKIP_VSCODE == "true" && $name == "chip-build-vscode" ]]; then
+                          echo "::notice::skipping $name by request"
+                          continue
+                      fi
+
+                      before_used=$(used_mb)
+                      before_avail=$(avail_mb)
+                      start=$SECONDS
+
+                      echo "::group::build $name  (avail ${before_avail} MB)"
+                      # Intentionally not aborting on failure: the point is to see
+                      # every image's cost and where the wall actually is, not to
+                      # stop at the first one.
+                      (cd "$dir" && ./build.sh $CLEAR) >"$LOGDIR/$name.log" 2>&1
+                      rc=$?
+                      elapsed=$((SECONDS - start))
+                      echo "::endgroup::"
+
+                      after_used=$(used_mb)
+                      after_avail=$(avail_mb)
+                      delta=$((after_used - before_used))
+
+                      status="ok"
+                      if [[ $rc -ne 0 ]]; then
+                          if grep -qiE 'no space left on device|ApplyLayer exit status 1' "$LOGDIR/$name.log"; then
+                              status="DISK"
+                              [[ -n $FIRST_DISK_FAILURE ]] || FIRST_DISK_FAILURE="$name"
+                          else
+                              status="fail"
+                          fi
+                          echo "::warning::$name failed (rc=$rc, $status); last 40 lines:"
+                          tail -40 "$LOGDIR/$name.log"
+                      fi
+
+                      printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+                          "$name" "$status" "$rc" "$elapsed" "$delta" "$after_avail" >>"$RESULTS"
+
+                      echo "$name: $status  +${delta} MB  ${after_avail} MB free  ${elapsed}s"
+                  done
+
+                  echo "FIRST_DISK_FAILURE=$FIRST_DISK_FAILURE" >>"$GITHUB_ENV"
+                  echo "START_AVAIL=$START_AVAIL" >>"$GITHUB_ENV"
+
+            - name: Summary
+              if: always()
+              run: |
+                  set -uo pipefail
+                  RESULTS="$RUNNER_TEMP/results.tsv"
+                  [[ -f $RESULTS ]] || { echo "no results recorded"; exit 0; }
+
+                  {
+                      echo "## Docker image disk probe"
+                      echo
+                      echo "Runner \`${{ inputs.runner || 'ubuntu-latest' }}\`, arch \`$(uname -m)\`, starting free \`${START_AVAIL:-?} MB\`."
+                      echo
+                      echo "| # | Image | Status | Added (MB) | Free after (MB) | Time (s) |"
+                      echo "|--:|-------|--------|-----------:|----------------:|---------:|"
+                      awk -F'\t' '{printf "| %d | `%s` | %s | %s | %s | %s |\n", NR, $1, $2, $5, $6, $4}' "$RESULTS"
+                      echo
+                      total=$(awk -F'\t' '{s+=$5} END {print s+0}' "$RESULTS")
+                      ok=$(awk -F'\t' '$2=="ok"' "$RESULTS" | wc -l)
+                      diskf=$(awk -F'\t' '$2=="DISK"' "$RESULTS" | wc -l)
+                      otherf=$(awk -F'\t' '$2=="fail"' "$RESULTS" | wc -l)
+                      echo "**Built ${ok} / $(wc -l <"$RESULTS")**, ${diskf} out-of-disk, ${otherf} other failures, ${total} MB added in total."
+                      if [[ -n ${FIRST_DISK_FAILURE:-} ]]; then
+                          echo
+                          echo "First image to hit the disk wall: \`${FIRST_DISK_FAILURE}\`"
+                      else
+                          echo
+                          echo "No image ran out of disk."
+                      fi
+                      echo
+                      echo "### Layer sharing at end of run"
+                      echo
+                      echo '```'
+                      docker system df -v 2>&1 | head -60
+                      echo '```'
+                  } >>"$GITHUB_STEP_SUMMARY"
+
+                  cat "$GITHUB_STEP_SUMMARY"
