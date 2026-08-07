@@ -12,11 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Measures how far a full docker image build gets on a given runner before it
-# runs out of disk, and what each image costs.
+# Measures, per image, how much disk a build costs and whether it succeeds.
 #
-# This exists to answer #30750 with data rather than estimates. It never pushes
-# and is never triggered automatically on master.
+# One job per image, which is deliberate. GitHub guarantees only 14GB of free
+# space, so the number that matters is the peak a single image reaches on its
+# own runner, not the total a sequential run accumulates. It also bounds the
+# blast radius: a lost runner costs one image rather than the whole sweep.
+#
+# Never pushes, and never runs automatically on master.
 
 name: Docker image disk probe
 
@@ -32,178 +35,100 @@ on:
                     - "ubuntu-24.04-arm"
                     - "namespace-profile-4x16"
                     - "namespace-profile-16x32"
-            path:
-                description: "Sub-path under integrations/docker/images (e.g. 'stage-2/*')"
-                default: "*"
-            clear:
-                description: "docker rmi each image after building it"
-                type: boolean
-                default: false
-            skip_vscode:
-                description: "Skip chip-build-vscode (the 55GB aggregator)"
-                type: boolean
-                default: false
-            local_version:
-                description: "Tag everything with a run-unique version, so no parent can come from the registry"
-                type: boolean
-                default: false
+            filter:
+                description: "Only probe images whose path matches this (e.g. stage-2)"
+                default: ""
     push:
         branches:
             - "dcj/docker-disk-probe"
 
 jobs:
+    enumerate:
+        name: Enumerate images
+        runs-on: ubuntu-latest
+        outputs:
+            images: ${{ steps.list.outputs.images }}
+        steps:
+            - name: Checkout
+              uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+            - name: List images in build-all order
+              id: list
+              env:
+                  FILTER: ${{ inputs.filter || '' }}
+              run: |
+                  set -euo pipefail
+                  mapfile -t dirs < <(
+                      find integrations/docker/images -name Dockerfile ! -path "*chip-cert-bins/*" \
+                          | sort | xargs -n1 dirname
+                  )
+                  json="[]"
+                  for d in "${dirs[@]}"; do
+                      [[ -n $FILTER && $d != *"$FILTER"* ]] && continue
+                      json=$(jq -c --arg n "${d##*/}" --arg p "$d" '. + [{name:$n, path:$p}]' <<<"$json")
+                  done
+                  echo "images=$json" >>"$GITHUB_OUTPUT"
+                  jq -r '.[] | "  " + .path' <<<"$json"
+                  echo "count: $(jq length <<<"$json")"
+
     probe:
-        name: Probe disk usage across all images
+        name: ${{ matrix.image.name }}
+        needs: enumerate
         runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
-        timeout-minutes: 355
+        timeout-minutes: 120
+        strategy:
+            fail-fast: false
+            max-parallel: 6
+            matrix:
+                image: ${{ fromJSON(needs.enumerate.outputs.images) }}
         steps:
             - name: Checkout
               uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-            - name: Runner disk inventory
-              run: |
-                  echo "runner: ${{ inputs.runner || 'ubuntu-latest' }}"
-                  echo "arch:   $(uname -m)"
-                  echo "cpus:   $(nproc)"
-                  echo "mem:    $(free -h | awk 'NR==2{print $2}')"
-                  echo
-                  df -h
-                  echo
-                  echo "docker data root: $(docker info --format '{{.DockerRootDir}}')"
-                  docker system df
-
-            - name: Build every image, recording disk after each
+            - name: Build and measure
               env:
-                  SUB_PATH: ${{ inputs.path || '*' }}
-                  CLEAR: ${{ inputs.clear && '--clear' || '' }}
-                  SKIP_VSCODE: ${{ inputs.skip_vscode }}
-                  # Empty means "use each image's own version file", which lets a
-                  # parent come from ghcr.io if it was not built earlier in this job.
-                  DOCKER_BUILD_VERSION: ${{ inputs.local_version && format('probe-{0}', github.run_id) || '' }}
+                  IMAGE_PATH: ${{ matrix.image.path }}
+                  IMAGE_NAME: ${{ matrix.image.name }}
               run: |
                   set -uo pipefail
-                  # GitHub runs steps under `bash -e`. The whole point of this job is
-                  # to keep going after an image fails, so errexit has to go.
+                  # GitHub runs steps under `bash -e`; a failing build must be
+                  # recorded rather than aborting before the disk figures are read.
                   set +e
 
-                  ROOT="$(git rev-parse --show-toplevel)"
-                  LOGDIR="$RUNNER_TEMP/probe-logs"
-                  RESULTS="$RUNNER_TEMP/results.tsv"
-                  mkdir -p "$LOGDIR"
-                  : >"$RESULTS"
-
-                  # Docker's data root is what actually fills up; measure that
-                  # filesystem rather than assuming it is /.
                   DOCKER_ROOT="$(docker info --format '{{.DockerRootDir}}')"
-                  avail_mb() { df -BM --output=avail "$DOCKER_ROOT" | tail -1 | tr -dc '0-9'; }
-                  used_mb() { df -BM --output=used "$DOCKER_ROOT" | tail -1 | tr -dc '0-9'; }
+                  avail() { df -BM --output=avail "$DOCKER_ROOT" | tail -1 | tr -dc '0-9'; }
+                  used() { df -BM --output=used "$DOCKER_ROOT" | tail -1 | tr -dc '0-9'; }
 
-                  START_AVAIL=$(avail_mb)
-                  echo "Starting available on $DOCKER_ROOT: ${START_AVAIL} MB"
+                  start_avail=$(avail)
+                  start_used=$(used)
+                  echo "runner=${{ inputs.runner || 'ubuntu-latest' }} arch=$(uname -m) free=${start_avail}MB"
 
-                  # Same enumeration and ordering that build-all.sh uses.
-                  mapfile -t DOCKERFILES < <(
-                      find "$ROOT/integrations/docker/images"/$SUB_PATH \
-                          -name Dockerfile ! -path "*chip-cert-bins/*" | sort
-                  )
-                  echo "Found ${#DOCKERFILES[@]} images"
+                  t0=$SECONDS
+                  (cd "$IMAGE_PATH" && ./build.sh) 2>&1 | tail -400
+                  rc=${PIPESTATUS[0]}
+                  elapsed=$((SECONDS - t0))
 
-                  FIRST_DISK_FAILURE=""
+                  end_avail=$(avail)
+                  peak=$(( $(used) - start_used ))
 
-                  for dockerfile in "${DOCKERFILES[@]}"; do
-                      dir="$(dirname "$dockerfile")"
-                      name="${dir##*/}"
-
-                      if [[ $SKIP_VSCODE == "true" && $name == "chip-build-vscode" ]]; then
-                          echo "::notice::skipping $name by request"
-                          continue
-                      fi
-
-                      before_used=$(used_mb)
-                      before_avail=$(avail_mb)
-                      start=$SECONDS
-
-                      echo "::group::build $name  (avail ${before_avail} MB)"
-                      # Intentionally not aborting on failure: the point is to see
-                      # every image's cost and where the wall actually is, not to
-                      # stop at the first one.
-                      rc=0
-                      (cd "$dir" && ./build.sh $CLEAR) >"$LOGDIR/$name.log" 2>&1 || rc=$?
-                      elapsed=$((SECONDS - start))
-                      echo "::endgroup::"
-
-                      after_used=$(used_mb)
-                      after_avail=$(avail_mb)
-                      delta=$((after_used - before_used))
-
-                      status="ok"
-                      if [[ $rc -ne 0 ]]; then
-                          if grep -qiE 'no space left on device|ApplyLayer exit status 1' "$LOGDIR/$name.log"; then
-                              status="DISK"
-                              [[ -n $FIRST_DISK_FAILURE ]] || FIRST_DISK_FAILURE="$name"
-                          else
-                              status="fail"
-                          fi
-                          echo "::warning::$name failed (rc=$rc, $status); last 40 lines:"
-                          tail -40 "$LOGDIR/$name.log"
-                      fi
-
-                      printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
-                          "$name" "$status" "$rc" "$elapsed" "$delta" "$after_avail" >>"$RESULTS"
-
-                      echo "$name: $status  +${delta} MB  ${after_avail} MB free  ${elapsed}s"
-                  done
-
-                  echo "FIRST_DISK_FAILURE=$FIRST_DISK_FAILURE" >>"$GITHUB_ENV"
-                  echo "START_AVAIL=$START_AVAIL" >>"$GITHUB_ENV"
-
-            - name: Summary
-              if: always()
-              run: |
-                  set -uo pipefail
-                  RESULTS="$RUNNER_TEMP/results.tsv"
-                  [[ -f $RESULTS ]] || { echo "no results recorded"; exit 0; }
+                  status=ok
+                  if [[ $rc -ne 0 ]]; then
+                      status=fail
+                      # Distinguish running out of room from an ordinary build break.
+                      if [[ $end_avail -lt 1024 ]]; then status=DISK; fi
+                  fi
 
                   {
-                      echo "## Docker image disk probe"
+                      echo "### \`$IMAGE_NAME\`"
                       echo
-                      echo "Runner \`${{ inputs.runner || 'ubuntu-latest' }}\`, arch \`$(uname -m)\`, starting free \`${START_AVAIL:-?} MB\`."
-                      echo
-                      echo "| # | Image | Status | Added (MB) | Free after (MB) | Time (s) |"
-                      echo "|--:|-------|--------|-----------:|----------------:|---------:|"
-                      awk -F'\t' '{printf "| %d | `%s` | %s | %s | %s | %s |\n", NR, $1, $2, $5, $6, $4}' "$RESULTS"
-                      echo
-                      total=$(awk -F'\t' '{s+=$5} END {print s+0}' "$RESULTS")
-                      ok=$(awk -F'\t' '$2=="ok"' "$RESULTS" | wc -l)
-                      diskf=$(awk -F'\t' '$2=="DISK"' "$RESULTS" | wc -l)
-                      otherf=$(awk -F'\t' '$2=="fail"' "$RESULTS" | wc -l)
-                      echo "**Built ${ok} / $(wc -l <"$RESULTS")**, ${diskf} out-of-disk, ${otherf} other failures, ${total} MB added in total."
-                      if [[ -n ${FIRST_DISK_FAILURE:-} ]]; then
-                          echo
-                          echo "First image to hit the disk wall: \`${FIRST_DISK_FAILURE}\`"
-                      else
-                          echo
-                          echo "No image ran out of disk."
-                      fi
-                      echo
-                      echo "### Layer sharing at end of run"
-                      echo
-                      echo '```'
-                      # head closes the pipe early; under pipefail that surfaces as
-                      # SIGPIPE (141) and would fail the step.
-                      docker system df -v 2>&1 | head -60 || true
-                      echo '```'
+                      echo "| metric | value |"
+                      echo "|---|---|"
+                      echo "| status | **$status** (rc=$rc) |"
+                      echo "| disk added | ${peak} MB |"
+                      echo "| free at start | ${start_avail} MB |"
+                      echo "| free at end | ${end_avail} MB |"
+                      echo "| peak vs 14GB guarantee | $(( peak * 100 / 14336 ))% |"
+                      echo "| build time | ${elapsed}s |"
                   } >>"$GITHUB_STEP_SUMMARY"
 
-                  cat "$GITHUB_STEP_SUMMARY"
-
-            - name: Upload per-image build logs
-              if: always()
-              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-              with:
-                  name: probe-logs-${{ inputs.runner || 'ubuntu-latest' }}
-                  path: |
-                      ${{ runner.temp }}/probe-logs/
-                      ${{ runner.temp }}/results.tsv
-                  retention-days: 14
-                  if-no-files-found: warn
+                  echo "RESULT $IMAGE_NAME $status ${peak}MB ${elapsed}s"
+                  exit $rc
