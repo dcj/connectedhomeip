@@ -55,7 +55,7 @@ jobs:
     probe:
         name: Probe disk usage across all images
         runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
-        timeout-minutes: 350
+        timeout-minutes: 355
         steps:
             - name: Checkout
               uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -82,6 +82,9 @@ jobs:
                   DOCKER_BUILD_VERSION: ${{ inputs.local_version && format('probe-{0}', github.run_id) || '' }}
               run: |
                   set -uo pipefail
+                  # GitHub runs steps under `bash -e`. The whole point of this job is
+                  # to keep going after an image fails, so errexit has to go.
+                  set +e
 
                   ROOT="$(git rev-parse --show-toplevel)"
                   LOGDIR="$RUNNER_TEMP/probe-logs"
@@ -124,8 +127,8 @@ jobs:
                       # Intentionally not aborting on failure: the point is to see
                       # every image's cost and where the wall actually is, not to
                       # stop at the first one.
-                      (cd "$dir" && ./build.sh $CLEAR) >"$LOGDIR/$name.log" 2>&1
-                      rc=$?
+                      rc=0
+                      (cd "$dir" && ./build.sh $CLEAR) >"$LOGDIR/$name.log" 2>&1 || rc=$?
                       elapsed=$((SECONDS - start))
                       echo "::endgroup::"
 
@@ -186,8 +189,21 @@ jobs:
                       echo "### Layer sharing at end of run"
                       echo
                       echo '```'
-                      docker system df -v 2>&1 | head -60
+                      # head closes the pipe early; under pipefail that surfaces as
+                      # SIGPIPE (141) and would fail the step.
+                      docker system df -v 2>&1 | head -60 || true
                       echo '```'
                   } >>"$GITHUB_STEP_SUMMARY"
 
                   cat "$GITHUB_STEP_SUMMARY"
+
+            - name: Upload per-image build logs
+              if: always()
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+              with:
+                  name: probe-logs-${{ inputs.runner || 'ubuntu-latest' }}
+                  path: |
+                      ${{ runner.temp }}/probe-logs/
+                      ${{ runner.temp }}/results.tsv
+                  retention-days: 14
+                  if-no-files-found: warn
