@@ -35,6 +35,35 @@ on:
               default: false
 
 jobs:
+    check_versions:
+        name: Check changed images bump the version
+        runs-on: ubuntu-latest
+        if: github.event_name == 'pull_request'
+        permissions:
+            contents: read
+        steps:
+            - name: Checkout
+              uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+            - name: Detect changed paths
+              uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
+              id: changed_paths
+              with:
+                  filters: |
+                      images:
+                        - 'integrations/docker/images/**'
+                        - '!integrations/docker/images/chip-cert-bins/**'
+                      version:
+                        - 'integrations/docker/images/base/chip-build/version'
+            # The chip-build images share one ever increasing version, and every
+            # image change bumps it. A build is skipped when the tag already
+            # exists, so a change without a bump is never built and the run
+            # passes without having exercised it.
+            - name: Require a version bump
+              if: steps.changed_paths.outputs.images == 'true' && steps.changed_paths.outputs.version != 'true'
+              run: |
+                  echo "::error::A docker image changed but integrations/docker/images/base/chip-build/version did not. The images share one version and every change bumps it; without a bump the build is skipped and the change is never built."
+                  exit 1
+
     build_images_base:
         name: Build Docker CHIP Build images - base
         runs-on: ubuntu-latest
