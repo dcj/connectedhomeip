@@ -27,3 +27,4 @@ WORKDIR /opt/espressif/esp-idf
 RUN set -x \
     && ./install.sh \
     && : # last line
+# selftest: image changed without a version bump
