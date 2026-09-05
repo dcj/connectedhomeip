@@ -46,30 +46,50 @@ class ElectricalAlarmTestBaseHelper(MatterBaseTest):
             endpoint=endpoint, cluster=cluster, attribute=cluster.Attributes.State))
 
     def alarm_lifecycle_steps(self, alarm_name: str) -> list[TestStep]:
+        """Mirrors the step numbering of esalm_alarm_testcase.adoc, sub-steps included."""
         return [
             TestStep(1, "Commission DUT to TH", is_commissioning=True),
             TestStep(2, "TH reads TestEventTriggersEnabled from General Diagnostics",
-                     "Value is 1 (True). If 0, skip remaining steps."),
-            TestStep(3, "TH reads Supported, Mask, Latch, and State",
-                     f"SUCCESS. The {alarm_name} bit is set in Supported and enabled in Mask."),
-            TestStep(4, "TH establishes subscription to State with MinIntervalFloor=0, MaxIntervalCeiling=30",
-                     "Subscription established; initial priming report received."),
-            TestStep(5, f"TH sends TestEventTrigger to simulate the {alarm_name} alarm condition",
-                     f"SUCCESS. Subscription report received with the {alarm_name} bit set in State."),
-            TestStep(6, "TH waits up to 30 seconds for Notify event",
-                     f"Notify received. Active has the {alarm_name} bit, Inactive does not, State does, Mask matches."),
-            TestStep(7, "TH reads State",
-                     f"DUT returns an AlarmBitmap with the {alarm_name} bit set."),
-            TestStep(8, f"TH sends TestEventTrigger to clear the {alarm_name} alarm condition", "SUCCESS."),
-            TestStep(9, f"If non-latched: TH awaits subscription report with the {alarm_name} bit cleared",
-                     f"Report received with the {alarm_name} bit at 0."),
-            TestStep(10, "If non-latched: TH waits up to 30 seconds for Notify event",
-                     f"Notify received. Inactive has the {alarm_name} bit, Active does not, State does not."),
-            TestStep(11, "If latched: TH reads State",
-                     f"The {alarm_name} bit remains set until Reset."),
-            TestStep(12, f"If latched and Reset supported: TH sends Reset for the {alarm_name} alarm",
-                     f"SUCCESS. Subscription report received with the {alarm_name} bit cleared."),
-            TestStep(13, "TH sends the all-alarms-cleared TestEventTrigger", "SUCCESS. State reads back as 0."),
+                     "Value is 1 (True). If 0, skip the remaining steps and end the test case."),
+            TestStep(3, "TH reads Supported. Store value as Supported.",
+                     f"DUT replies a map32 AlarmBitmap with the {alarm_name} bit set (alarm is supported)."),
+            TestStep("3a", "TH reads Mask. Store value as Mask.",
+                     f"DUT replies a map32 AlarmBitmap with the {alarm_name} bit set (alarm is enabled in Mask)."),
+            TestStep("3b", "TH reads Latch. Store value as Latch.",
+                     f"DUT replies a map32 AlarmBitmap. Record whether the {alarm_name} bit is 0 or 1 as Latch."),
+            TestStep("3c", "TH reads State. Store value as InitialState.",
+                     f"DUT replies a map32 AlarmBitmap. The {alarm_name} bit is 0 (alarm not yet active)."),
+            TestStep(4, "TH establishes a subscription to State with MinIntervalFloor=0 and MaxIntervalCeiling=30",
+                     "Subscription is established successfully."),
+            TestStep("4a", "TH awaits a subscription report of an initial priming report for State.",
+                     "Priming report received carrying the current State value."),
+            TestStep(5, f"TH sends TestEventTrigger to simulate the {alarm_name} alarm condition.",
+                     "DUT responds with status SUCCESS."),
+            TestStep("5a", "TH awaits a subscription report for State.",
+                     f"Subscription report received with the {alarm_name} bit set in State."),
+            TestStep(6, "TH waits up to 30 seconds for a Notify event.",
+                     f"Notify received. Active has the {alarm_name} bit set, Inactive does not, State does, "
+                     "and Mask equals the current Mask attribute."),
+            TestStep(7, "TH reads State.",
+                     f"DUT replies a map32 AlarmBitmap with the {alarm_name} bit set."),
+            TestStep(8, f"TH sends TestEventTrigger to clear the {alarm_name} alarm condition.",
+                     "DUT responds with status SUCCESS."),
+            TestStep(9, "IF non-latched: TH awaits a subscription report for State.",
+                     f"Subscription report received with the {alarm_name} bit at 0 in State."),
+            TestStep(10, "IF non-latched: TH waits up to 30 seconds for a Notify event.",
+                     f"Notify received. Inactive has the {alarm_name} bit set, Active does not, State does not."),
+            TestStep(11, "IF latched: TH reads State.",
+                     f"The {alarm_name} bit remains set in State (latched alarm persists until Reset)."),
+            TestStep(12, f"IF latched and Reset is supported: TH sends Reset with the {alarm_name} bit set.",
+                     "DUT responds with status SUCCESS."),
+            TestStep("12a", "IF latched and Reset is supported: TH awaits a subscription report for State.",
+                     f"Subscription report received with the {alarm_name} bit at 0 in State."),
+            TestStep("12b", "IF latched: TH waits up to 30 seconds for a Notify event.",
+                     f"Notify received. Inactive has the {alarm_name} bit set, Active does not, State does not."),
+            TestStep("12c", "TH reads State.",
+                     f"DUT replies a map32 AlarmBitmap with the {alarm_name} bit at 0."),
+            TestStep(13, "TH sends the All Alarms Test Event Clear TestEventTrigger.",
+                     "DUT responds with status SUCCESS."),
         ]
 
     async def run_alarm_lifecycle_test(self, alarm_name: str, alarm_bit: int,
@@ -82,31 +102,33 @@ class ElectricalAlarmTestBaseHelper(MatterBaseTest):
 
         self.step(2)
         gen_diag = Clusters.GeneralDiagnostics
-        triggers_enabled = await self.read_single_attribute_check_success(
-            endpoint=0, cluster=gen_diag, attribute=gen_diag.Attributes.TestEventTriggersEnabled)
-        if not triggers_enabled:
+        if not await self.read_single_attribute_check_success(
+                endpoint=0, cluster=gen_diag, attribute=gen_diag.Attributes.TestEventTriggersEnabled):
             self.mark_all_remaining_steps_skipped(3)
             return
 
         self.step(3)
         supported = await self.read_single_attribute_check_success(
             endpoint=endpoint, cluster=cluster, attribute=attrs.Supported)
+        asserts.assert_true(int(supported) & alarm_bit,
+                            f"{alarm_name} is not set in Supported, so this alarm cannot be tested")
+
+        self.step("3a")
         mask = await self.read_single_attribute_check_success(
             endpoint=endpoint, cluster=cluster, attribute=attrs.Mask)
+        asserts.assert_true(int(mask) & alarm_bit,
+                            f"{alarm_name} is not enabled in Mask, so the alarm would be suppressed")
+
+        self.step("3b")
         attribute_list = await self.read_single_attribute_check_success(
             endpoint=endpoint, cluster=cluster, attribute=attrs.AttributeList)
         latch = 0
         if attrs.Latch.attribute_id in attribute_list:
             latch = await self.read_single_attribute_check_success(
                 endpoint=endpoint, cluster=cluster, attribute=attrs.Latch)
-
-        asserts.assert_true(int(supported) & alarm_bit,
-                            f"{alarm_name} is not set in Supported, so this alarm cannot be tested")
-        asserts.assert_true(int(mask) & alarm_bit,
-                            f"{alarm_name} is not enabled in Mask, so the alarm would be suppressed")
-
         is_latched = bool(int(latch) & alarm_bit)
 
+        self.step("3c")
         # A trigger only reports if it changes State, so the alarm must start inactive.
         asserts.assert_false(await self.read_state(endpoint) & alarm_bit,
                              f"{alarm_name} is already active before the test starts")
@@ -120,10 +142,19 @@ class ElectricalAlarmTestBaseHelper(MatterBaseTest):
         await event_sub.start(self.default_controller, self.dut_node_id,
                               endpoint=endpoint, min_interval_sec=0, max_interval_sec=30)
 
+        self.step("4a")
+        # AttributeSubscriptionHandler.start() registers its callback only after ReadAttribute
+        # returns, so the priming report never reaches the queue. Read for the baseline instead;
+        # every later report here is change-driven and does arrive.
+        asserts.assert_false(await self.read_state(endpoint) & alarm_bit,
+                             f"Priming value of State already has the {alarm_name} bit set")
+
         self.step(5)
         state_sub.reset()
         event_sub.reset()
         await self.send_test_event_trigger(trigger_set)
+
+        self.step("5a")
         state_sub.await_all_expected_report_matches(
             [AttributeMatcher.from_callable(f"State has the {alarm_name} bit set",
                                             lambda report: bool(report.value & alarm_bit))],
@@ -131,9 +162,9 @@ class ElectricalAlarmTestBaseHelper(MatterBaseTest):
 
         self.step(6)
         notify_event = event_sub.wait_for_event_report(cluster.Events.Notify, timeout_sec=30)
-        asserts.assert_true(notify_event.active & alarm_bit, f"Notify event: {alarm_name} not set in Active")
-        asserts.assert_false(notify_event.inactive & alarm_bit, f"Notify event: {alarm_name} set in Inactive")
-        asserts.assert_true(notify_event.state & alarm_bit, f"Notify event: {alarm_name} not set in State")
+        asserts.assert_true(notify_event.active & alarm_bit, f"Notify: {alarm_name} not set in Active")
+        asserts.assert_false(notify_event.inactive & alarm_bit, f"Notify: {alarm_name} set in Inactive")
+        asserts.assert_true(notify_event.state & alarm_bit, f"Notify: {alarm_name} not set in State")
         current_mask = await self.read_single_attribute_check_success(
             endpoint=endpoint, cluster=cluster, attribute=attrs.Mask)
         asserts.assert_equal(notify_event.mask, current_mask,
@@ -148,52 +179,70 @@ class ElectricalAlarmTestBaseHelper(MatterBaseTest):
         event_sub.reset()
         await self.send_test_event_trigger(trigger_clear)
 
+        cleared = AttributeMatcher.from_callable(f"State has the {alarm_name} bit cleared",
+                                                 lambda report: not bool(report.value & alarm_bit))
+
         if not is_latched:
             self.step(9)
-            state_sub.await_all_expected_report_matches(
-                [AttributeMatcher.from_callable(f"State has the {alarm_name} bit cleared",
-                                                lambda report: not bool(report.value & alarm_bit))],
-                timeout_sec=30)
+            state_sub.await_all_expected_report_matches([cleared], timeout_sec=30)
 
             self.step(10)
             clear_event = event_sub.wait_for_event_report(cluster.Events.Notify, timeout_sec=30)
             asserts.assert_true(clear_event.inactive & alarm_bit,
-                                f"Notify event: {alarm_name} not set in Inactive on clear")
+                                f"Notify: {alarm_name} not set in Inactive on clear")
             asserts.assert_false(clear_event.active & alarm_bit,
-                                 f"Notify event: {alarm_name} set in Active on clear")
+                                 f"Notify: {alarm_name} set in Active on clear")
             asserts.assert_false(clear_event.state & alarm_bit,
-                                 f"Notify event: {alarm_name} still set in State on clear")
+                                 f"Notify: {alarm_name} still set in State on clear")
 
-            self.step(11)
-            self.mark_current_step_skipped()
-            self.step(12)
-            self.mark_current_step_skipped()
+            for skipped in (11, 12, "12a", "12b", "12c"):
+                self.step(skipped)
+                self.mark_current_step_skipped()
         else:
-            self.step(9)
-            self.mark_current_step_skipped()
-            self.step(10)
-            self.mark_current_step_skipped()
+            for skipped in (9, 10):
+                self.step(skipped)
+                self.mark_current_step_skipped()
 
             self.step(11)
             asserts.assert_true(await self.read_state(endpoint) & alarm_bit,
                                 f"Latched alarm: {alarm_name} should still be set after the condition clears")
 
-            self.step(12)
             accepted_cmds = await self.read_single_attribute_check_success(
                 endpoint=endpoint, cluster=cluster, attribute=attrs.AcceptedCommandList)
-            if cmds.Reset.command_id in accepted_cmds:
+            has_reset = cmds.Reset.command_id in accepted_cmds
+
+            self.step(12)
+            if has_reset:
                 state_sub.reset()
+                event_sub.reset()
                 await self.send_single_cmd(cmd=cmds.Reset(alarms=alarm_bit), endpoint=endpoint)
-                state_sub.await_all_expected_report_matches(
-                    [AttributeMatcher.from_callable("State cleared after Reset",
-                                                    lambda report: not bool(report.value & alarm_bit))],
-                    timeout_sec=30)
+            else:
+                self.mark_current_step_skipped()
+
+            self.step("12a")
+            if has_reset:
+                state_sub.await_all_expected_report_matches([cleared], timeout_sec=30)
+            else:
+                self.mark_current_step_skipped()
+
+            self.step("12b")
+            if has_reset:
+                reset_event = event_sub.wait_for_event_report(cluster.Events.Notify, timeout_sec=30)
+                asserts.assert_true(reset_event.inactive & alarm_bit,
+                                    f"Notify: {alarm_name} not set in Inactive on Reset")
+                asserts.assert_false(reset_event.active & alarm_bit,
+                                     f"Notify: {alarm_name} set in Active on Reset")
+                asserts.assert_false(reset_event.state & alarm_bit,
+                                     f"Notify: {alarm_name} still set in State on Reset")
+            else:
+                self.mark_current_step_skipped()
+
+            self.step("12c")
+            if has_reset:
+                asserts.assert_false(await self.read_state(endpoint) & alarm_bit,
+                                     f"{alarm_name} should be 0 in State after Reset")
             else:
                 self.mark_current_step_skipped()
 
         self.step(13)
         await self.send_test_event_trigger(TRIGGER_ALL_CLEAR)
-        # Read rather than await a report: State may already be 0 by now, and a DUT does not
-        # report an unchanged value.
-        asserts.assert_equal(await self.read_state(endpoint), 0,
-                             "State should be 0 after the cleanup trigger")
