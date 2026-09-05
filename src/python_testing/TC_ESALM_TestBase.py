@@ -181,6 +181,7 @@ class ElectricalAlarmTestBaseHelper(MatterBaseTest):
 
         cleared = AttributeMatcher.from_callable(f"State has the {alarm_name} bit cleared",
                                                  lambda report: not bool(report.value & alarm_bit))
+        has_reset = False
 
         if not is_latched:
             self.step(9)
@@ -195,7 +196,7 @@ class ElectricalAlarmTestBaseHelper(MatterBaseTest):
             asserts.assert_false(clear_event.state & alarm_bit,
                                  f"Notify: {alarm_name} still set in State on clear")
 
-            for skipped in (11, 12, "12a", "12b", "12c"):
+            for skipped in (11, 12, "12a", "12b"):
                 self.step(skipped)
                 self.mark_current_step_skipped()
         else:
@@ -237,12 +238,14 @@ class ElectricalAlarmTestBaseHelper(MatterBaseTest):
             else:
                 self.mark_current_step_skipped()
 
-            self.step("12c")
-            if has_reset:
-                asserts.assert_false(await self.read_state(endpoint) & alarm_bit,
-                                     f"{alarm_name} should be 0 in State after Reset")
-            else:
-                self.mark_current_step_skipped()
+        self.step("12c")
+        if is_latched and not has_reset:
+            # Nothing has cleared it: the condition went away but the latch holds and there
+            # is no Reset command to release it.
+            self.mark_current_step_skipped()
+        else:
+            asserts.assert_false(await self.read_state(endpoint) & alarm_bit,
+                                 f"{alarm_name} should be 0 in State by this point")
 
         self.step(13)
         await self.send_test_event_trigger(TRIGGER_ALL_CLEAR)
