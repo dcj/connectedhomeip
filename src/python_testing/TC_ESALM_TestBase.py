@@ -25,9 +25,29 @@ from matter.testing.runner import TestStep
 cluster = Clusters.ElectricalAlarm
 AlarmBitmap = cluster.Bitmaps.AlarmBitmap
 
-# All-alarms-cleared trigger from the PIXIT Variable Values table of the test plan. Unlike a
-# per-alarm clear, this one drops latched alarms too, which is what the cleanup step needs.
+# The complete TestEventTrigger table for this cluster, from the PIXIT Variable Values section
+# of the Electrical Alarm test plan. Keeping every code in one place means a case file names
+# its alarm and nothing else, and the table can be checked against the plan in one read.
+#
+# The all-alarms-cleared code differs from a per-alarm clear: it drops latched alarms too,
+# which is what the cleanup step needs and what a per-alarm clear deliberately does not do.
 TRIGGER_ALL_CLEAR = 0x00A1000000000000
+
+_BASE = 0x00A1000000000000
+
+# alarm name -> (simulate, clear)
+TRIGGERS: dict[str, tuple[int, int]] = {
+    "OverVoltage": (_BASE | 0x01, _BASE | 0x02),
+    "UnderVoltage": (_BASE | 0x03, _BASE | 0x04),
+    "OverFrequency": (_BASE | 0x05, _BASE | 0x06),
+    "UnderFrequency": (_BASE | 0x07, _BASE | 0x08),
+    "OverPower": (_BASE | 0x09, _BASE | 0x0A),
+    "UnderPower": (_BASE | 0x0B, _BASE | 0x0C),
+    "OverCurrent": (_BASE | 0x0D, _BASE | 0x0E),
+    "UnderCurrent": (_BASE | 0x0F, _BASE | 0x10),
+    "PowerImport": (_BASE | 0x11, _BASE | 0x12),
+    "PowerExport": (_BASE | 0x13, _BASE | 0x14),
+}
 
 
 class ElectricalAlarmTestBaseHelper(MatterBaseTest):
@@ -92,8 +112,10 @@ class ElectricalAlarmTestBaseHelper(MatterBaseTest):
                      "DUT responds with status SUCCESS."),
         ]
 
-    async def run_alarm_lifecycle_test(self, alarm_name: str, alarm_bit: int,
-                                       trigger_set: int, trigger_clear: int) -> None:
+    async def run_alarm_lifecycle_test(self, alarm_name: str, alarm_bit: int) -> None:
+        """Run the shared alarm lifecycle. Trigger codes are looked up from TRIGGERS."""
+        asserts.assert_in(alarm_name, TRIGGERS, f"No TestEventTrigger codes defined for {alarm_name}")
+        trigger_set, trigger_clear = TRIGGERS[alarm_name]
         endpoint = self.get_endpoint()
         attrs = cluster.Attributes
         cmds = cluster.Commands

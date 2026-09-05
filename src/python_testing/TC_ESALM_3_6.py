@@ -47,10 +47,6 @@ from matter.testing.runner import TestStep, default_matter_test_main
 ALARM_NAME = "UnderPower"
 ALARM_BIT = int(AlarmBitmap.kUnderPower)
 
-# Set and clear codes for this alarm, from the PIXIT Variable Values table of the test plan.
-TRIGGER_SET = 0x00A100000000000B
-TRIGGER_CLEAR = 0x00A100000000000C
-
 
 class TC_ESALM_3_6(ElectricalAlarmTestBaseHelper):
 
@@ -68,7 +64,7 @@ class TC_ESALM_3_6(ElectricalAlarmTestBaseHelper):
         delivers a subscription report, a Notify event carries the correct fields, a latched
         alarm persists until Reset, and a non-latched alarm clears when the condition goes away.
         """
-        await self.run_alarm_lifecycle_test(ALARM_NAME, ALARM_BIT, TRIGGER_SET, TRIGGER_CLEAR)
+        await self.run_alarm_lifecycle_test(ALARM_NAME, ALARM_BIT)
 
 
 if __name__ == "__main__":
