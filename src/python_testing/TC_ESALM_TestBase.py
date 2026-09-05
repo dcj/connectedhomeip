@@ -65,51 +65,78 @@ class ElectricalAlarmTestBaseHelper(MatterBaseTest):
         return int(await self.read_single_attribute_check_success(
             endpoint=endpoint, cluster=cluster, attribute=cluster.Attributes.State))
 
-    def alarm_lifecycle_steps(self, alarm_name: str) -> list[TestStep]:
-        """Mirrors the step numbering of esalm_alarm_testcase.adoc, sub-steps included."""
+    def alarm_lifecycle_steps(self, alarm_name: str, alarm_bit: int) -> list[TestStep]:
+        """The step table of esalm_alarm_testcase.adoc, rendered for one alarm.
+
+        Descriptions and expectations reproduce the plan's text with its macros expanded, so a
+        test house can match a step in the log to the same-numbered row of the test plan.
+        """
+        bit = int(alarm_bit).bit_length() - 1
+        trig_set, trig_clear = (f"0x{c:016X}" for c in TRIGGERS[alarm_name])
+        trigger_cmd = ("TH sends TestEventTrigger command to General Diagnostics Cluster on Endpoint 0 "
+                       "with EnableKey field set to PIXIT.ESALM.TEST_EVENT_TRIGGER_KEY and EventTrigger "
+                       "field set to PIXIT.ESALM.TEST_EVENT_TRIGGER")
+        notify_cleared = (f"Receive Notify event. The Inactive field has bit {bit} set. The Active field "
+                          f"does not have bit {bit} set. The State field does not have bit {bit} set. "
+                          "The Mask field equals the current Mask attribute value.")
+        report_cleared = f"Subscription report received with bit {bit} = 0 in State."
         return [
             TestStep(1, "Commission DUT to TH", is_commissioning=True),
-            TestStep(2, "TH reads TestEventTriggersEnabled from General Diagnostics",
-                     "Value is 1 (True). If 0, skip the remaining steps and end the test case."),
-            TestStep(3, "TH reads Supported. Store value as Supported.",
-                     f"DUT replies a map32 AlarmBitmap with the {alarm_name} bit set (alarm is supported)."),
-            TestStep("3a", "TH reads Mask. Store value as Mask.",
-                     f"DUT replies a map32 AlarmBitmap with the {alarm_name} bit set (alarm is enabled in Mask)."),
-            TestStep("3b", "TH reads Latch. Store value as Latch.",
-                     f"DUT replies a map32 AlarmBitmap. Record whether the {alarm_name} bit is 0 or 1 as Latch."),
-            TestStep("3c", "TH reads State. Store value as InitialState.",
-                     f"DUT replies a map32 AlarmBitmap. The {alarm_name} bit is 0 (alarm not yet active)."),
-            TestStep(4, "TH establishes a subscription to State with MinIntervalFloor=0 and MaxIntervalCeiling=30",
+            TestStep(2, "TH reads TestEventTriggersEnabled attribute from General Diagnostics Cluster.",
+                     "Value has to be 1 (True). If 0, skip the remaining steps and end the test case."),
+            TestStep(3, "TH reads from the DUT the Supported. Store the value as Supported.",
+                     f"Verify that the DUT response contains a map32 AlarmBitmap with bit {bit} set "
+                     "(alarm is supported)."),
+            TestStep("3a", "TH reads from the DUT the Mask. Store the value as Mask.",
+                     f"Verify that the DUT response contains a map32 AlarmBitmap with bit {bit} set "
+                     "(alarm is enabled in Mask)."),
+            TestStep("3b", "TH reads from the DUT the Latch. Store the value as Latch.",
+                     "Verify that the DUT response contains a map32 AlarmBitmap. Record whether bit "
+                     f"{bit} is 0 or 1 as Latch for use in steps 9-12b."),
+            TestStep("3c", "TH reads from the DUT the State. Store the value as InitialState.",
+                     "Verify that the DUT response contains a map32 AlarmBitmap. Bit "
+                     f"{bit} is 0 (alarm not yet active before test begins)."),
+            TestStep(4, "TH establishes a subscription to State with MinIntervalFloor=0 and "
+                     "MaxIntervalCeiling=30.",
                      "Subscription is established successfully."),
-            TestStep("4a", "TH awaits a subscription report of an initial priming report for State.",
+            TestStep("4a", "TH awaits subscription report of an initial priming report for State.",
                      "Priming report received carrying the current State value."),
-            TestStep(5, f"TH sends TestEventTrigger to simulate the {alarm_name} alarm condition.",
-                     "DUT responds with status SUCCESS."),
-            TestStep("5a", "TH awaits a subscription report for State.",
-                     f"Subscription report received with the {alarm_name} bit set in State."),
+            TestStep(5, f"{trigger_cmd} with EventTrigger set to {trig_set} to simulate the "
+                     f"{alarm_name} alarm condition.",
+                     "Verify DUT responds w/ status SUCCESS(0x00)."),
+            TestStep("5a", f"TH awaits subscription report of a State value with bit {bit} set.",
+                     f"Subscription report received with bit {bit} set in State."),
             TestStep(6, "TH waits up to 30 seconds for a Notify event.",
-                     f"Notify received. Active has the {alarm_name} bit set, Inactive does not, State does, "
-                     "and Mask equals the current Mask attribute."),
-            TestStep(7, "TH reads State.",
-                     f"DUT replies a map32 AlarmBitmap with the {alarm_name} bit set."),
-            TestStep(8, f"TH sends TestEventTrigger to clear the {alarm_name} alarm condition.",
-                     "DUT responds with status SUCCESS."),
-            TestStep(9, "IF non-latched: TH awaits a subscription report for State.",
-                     f"Subscription report received with the {alarm_name} bit at 0 in State."),
-            TestStep(10, "IF non-latched: TH waits up to 30 seconds for a Notify event.",
-                     f"Notify received. Inactive has the {alarm_name} bit set, Active does not, State does not."),
-            TestStep(11, "IF latched: TH reads State.",
-                     f"The {alarm_name} bit remains set in State (latched alarm persists until Reset)."),
-            TestStep(12, f"IF latched and Reset is supported: TH sends Reset with the {alarm_name} bit set.",
-                     "DUT responds with status SUCCESS."),
-            TestStep("12a", "IF latched and Reset is supported: TH awaits a subscription report for State.",
-                     f"Subscription report received with the {alarm_name} bit at 0 in State."),
-            TestStep("12b", "IF latched: TH waits up to 30 seconds for a Notify event.",
-                     f"Notify received. Inactive has the {alarm_name} bit set, Active does not, State does not."),
-            TestStep("12c", "TH reads State.",
-                     f"DUT replies a map32 AlarmBitmap with the {alarm_name} bit at 0."),
-            TestStep(13, "TH sends the All Alarms Test Event Clear TestEventTrigger.",
-                     "DUT responds with status SUCCESS."),
+                     f"Receive Notify event. The Active field has bit {bit} set. The Inactive field does "
+                     f"not have bit {bit} set. The State field has bit {bit} set. The Mask field equals "
+                     "the current Mask attribute value."),
+            TestStep(7, "TH reads from the DUT the State.",
+                     f"Verify that the DUT response contains a map32 AlarmBitmap with bit {bit} set."),
+            TestStep(8, f"{trigger_cmd} with EventTrigger set to {trig_clear} to clear the "
+                     f"{alarm_name} alarm condition.",
+                     "Verify DUT responds w/ status SUCCESS(0x00)."),
+            TestStep(9, f"IF bit {bit} of Latch is 0 (non-latched): TH awaits subscription report of a "
+                     f"State value with bit {bit} cleared.",
+                     report_cleared),
+            TestStep(10, f"IF bit {bit} of Latch is 0 (non-latched): TH waits up to 30 seconds for a "
+                     "Notify event.",
+                     notify_cleared),
+            TestStep(11, f"IF bit {bit} of Latch is 1 (latched): TH reads from the DUT the State.",
+                     f"Bit {bit} remains set in State (latched alarm persists until Reset)."),
+            TestStep(12, f"IF bit {bit} is latched and Reset is supported: TH sends command Reset with "
+                     f"bit {bit} set in the Alarms field.",
+                     "Verify DUT responds w/ status SUCCESS(0x00)."),
+            TestStep("12a", f"IF bit {bit} is latched and Reset is supported: TH awaits subscription "
+                     f"report of a State value with bit {bit} cleared.",
+                     report_cleared),
+            TestStep("12b", f"IF bit {bit} of Latch is 1 (latched): TH waits up to 30 seconds for a "
+                     "Notify event.",
+                     notify_cleared),
+            TestStep("12c", "TH reads from the DUT the State.",
+                     f"Verify that the DUT response contains a map32 AlarmBitmap with bit {bit} = 0."),
+            TestStep(13, f"{trigger_cmd} for All Alarms Test Event Clear "
+                     "(PIXIT.ESALM.TEST_EVENT_TRIGGER = 0x00A1_0000_0000_0000).",
+                     "Verify DUT responds w/ status SUCCESS(0x00)."),
         ]
 
     async def run_alarm_lifecycle_test(self, alarm_name: str, alarm_bit: int) -> None:

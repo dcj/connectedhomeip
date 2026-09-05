@@ -54,7 +54,7 @@ class TC_ESALM_3_4(ElectricalAlarmTestBaseHelper):
         return ["ESALM.S", "ESALM.S.F24", "ESALM.S.E0000"]
 
     def steps_TC_ESALM_3_4(self) -> list[TestStep]:
-        return self.alarm_lifecycle_steps(ALARM_NAME)
+        return self.alarm_lifecycle_steps(ALARM_NAME, ALARM_BIT)
 
     @run_if_endpoint_matches(has_feature(cluster, cluster.Bitmaps.Feature.kUnderFrequency))
     async def test_TC_ESALM_3_4(self):

@@ -44,23 +44,23 @@ from TC_ESALM_TestBase import AlarmBitmap, ElectricalAlarmTestBaseHelper, cluste
 from matter.testing.decorators import has_feature, run_if_endpoint_matches
 from matter.testing.runner import TestStep, default_matter_test_main
 
-ALARM_NAME = "PowerExport"
-ALARM_BIT = int(AlarmBitmap.kPowerExported)
+ALARM_NAME = "OverVoltage"
+ALARM_BIT = int(AlarmBitmap.kOverVoltage)
 
 
-class TC_ESALM_3_10(ElectricalAlarmTestBaseHelper):
+class TC_ESALM_3_1(ElectricalAlarmTestBaseHelper):
 
-    def pics_TC_ESALM_3_10(self) -> list[str]:
-        return ["ESALM.S", "ESALM.S.F30", "ESALM.S.E0000"]
+    def pics_TC_ESALM_3_1(self) -> list[str]:
+        return ["ESALM.S", "ESALM.S.F21", "ESALM.S.E0000"]
 
-    def steps_TC_ESALM_3_10(self) -> list[TestStep]:
+    def steps_TC_ESALM_3_1(self) -> list[TestStep]:
         return self.alarm_lifecycle_steps(ALARM_NAME, ALARM_BIT)
 
-    @run_if_endpoint_matches(has_feature(cluster, cluster.Bitmaps.Feature.kPowerExport))
-    async def test_TC_ESALM_3_10(self):
-        """[TC-ESALM-3.10] PowerExport alarm lifecycle with Server as DUT
+    @run_if_endpoint_matches(has_feature(cluster, cluster.Bitmaps.Feature.kOverVoltage))
+    async def test_TC_ESALM_3_1(self):
+        """[TC-ESALM-3.1] OverVoltage alarm lifecycle with Server as DUT
 
-        Verifies the lifecycle of the PowerExport alarm: the condition sets its bit in State and
+        Verifies the lifecycle of the OverVoltage alarm: the condition sets its bit in State and
         delivers a subscription report, a Notify event carries the correct fields, a latched
         alarm persists until Reset, and a non-latched alarm clears when the condition goes away.
         """
