@@ -44,6 +44,7 @@ from mobly import asserts
 
 import matter.clusters as Clusters
 from matter.interaction_model import InteractionModelError, Status
+from matter.testing import matter_asserts
 from matter.testing.decorators import has_cluster, run_if_endpoint_matches
 from matter.testing.matter_testing import MatterBaseTest
 from matter.testing.runner import default_matter_test_main
@@ -108,12 +109,14 @@ class TC_ESALM_2_3(MatterBaseTest):
                               "value as InitialMask.")
         initial_mask = await self.read_single_attribute_check_success(
             endpoint=endpoint, cluster=cluster, attribute=attrs.Mask)
+        matter_asserts.assert_valid_uint32(initial_mask, "Mask")
 
         self.step("2c", "TH reads from the DUT the State.",
                   expectation="Verify that the DUT response contains an AlarmBitmap (map32) value. Store the "
                               "value as InitialState.")
         initial_state = await self.read_single_attribute_check_success(
             endpoint=endpoint, cluster=cluster, attribute=attrs.State)
+        matter_asserts.assert_valid_uint32(initial_state, "State")
 
         attribute_list = await self.read_single_attribute_check_success(
             endpoint=endpoint, cluster=cluster, attribute=attrs.AttributeList)
@@ -247,6 +250,7 @@ class TC_ESALM_2_3(MatterBaseTest):
         if has_latch:
             latch = await self.read_single_attribute_check_success(
                 endpoint=endpoint, cluster=cluster, attribute=attrs.Latch)
+            matter_asserts.assert_valid_uint32(latch, "Latch")
             for _bit in range(32):
                 _candidate = 1 << _bit
                 if int(latch) & _candidate & int(supported):
