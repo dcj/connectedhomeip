@@ -24,16 +24,19 @@ config("includes") {
 
 executable("chip-electrical-protection-app") {
   sources = [
+    "${chip_root}/examples/electrical-protection-app/electrical-protection-common/src/device-energy-management-stub.cpp",
     "${chip_root}/examples/electrical-protection-app/electrical-protection-common/src/electrical-alarm-stub.cpp",
     "${chip_root}/examples/electrical-protection-app/electrical-protection-common/src/electrical-distribution-stub.cpp",
     "${chip_root}/examples/electrical-protection-app/electrical-protection-common/src/electrical-protection-alarm-stub.cpp",
     "${chip_root}/examples/electrical-protection-app/electrical-protection-common/src/power-topology-stub.cpp",
+    "${chip_root}/examples/energy-management/energy-management-triggers/DEMTestEventTriggers.cpp",
     "include/CHIPProjectAppConfig.h",
     "main.cpp",
   ]
 
   deps = [
     "${chip_root}/examples/electrical-protection-app/electrical-protection-common",
+    "${chip_root}/examples/energy-management/device-energy-management",
     "${chip_root}/examples/platform/linux:app-main",
     "${chip_root}/src/lib",
   ]
@@ -41,6 +44,7 @@ executable("chip-electrical-protection-app") {
   include_dirs = [
     "include",
     "${chip_root}/examples/electrical-protection-app/electrical-protection-common/include",
+    "${chip_root}/examples/energy-management/energy-management-triggers",
   ]
   output_dir = root_out_dir
 }

@@ -2888,13 +2888,22 @@
           "label": "MA-electrical-distribution-enclosure",
           "name": "MA-electrical-distribution-enclosure",
           "deviceTypeOrder": 0
+        },
+        {
+          "code": 1293,
+          "profileId": 259,
+          "label": "Device Energy Management",
+          "name": "Device Energy Management",
+          "deviceTypeOrder": 1
         }
       ],
       "deviceVersions": [
-        1
+        1,
+        3
       ],
       "deviceIdentifiers": [
-        1303
+        1303,
+        1293
       ],
       "deviceTypeName": "MA-electrical-distribution-enclosure",
       "deviceTypeCode": 1303,
@@ -3051,6 +3060,242 @@
               "minInterval": 1,
               "maxInterval": 65534,
               "reportableChange": 0
+            }
+          ]
+        },
+        {
+          "name": "Device Energy Management",
+          "code": 152,
+          "mfgCode": null,
+          "define": "DEVICE_ENERGY_MANAGEMENT_CLUSTER",
+          "side": "server",
+          "enabled": 1,
+          "commands": [
+            {
+              "name": "PowerRangeAdjustRequest",
+              "code": 8,
+              "mfgCode": null,
+              "source": "client",
+              "isIncoming": 1,
+              "isEnabled": 1
+            },
+            {
+              "name": "CancelPowerRangeAdjustRequest",
+              "code": 9,
+              "mfgCode": null,
+              "source": "client",
+              "isIncoming": 1,
+              "isEnabled": 1
+            }
+          ],
+          "attributes": [
+            {
+              "name": "ESAType",
+              "code": 0,
+              "mfgCode": null,
+              "side": "server",
+              "type": "ESATypeEnum",
+              "included": 1,
+              "storageOption": "External",
+              "singleton": 0,
+              "bounded": 0,
+              "defaultValue": null,
+              "reportable": 1,
+              "minInterval": 1,
+              "maxInterval": 65534,
+              "reportableChange": 0
+            },
+            {
+              "name": "ESACanGenerate",
+              "code": 1,
+              "mfgCode": null,
+              "side": "server",
+              "type": "boolean",
+              "included": 1,
+              "storageOption": "External",
+              "singleton": 0,
+              "bounded": 0,
+              "defaultValue": null,
+              "reportable": 1,
+              "minInterval": 1,
+              "maxInterval": 65534,
+              "reportableChange": 0
+            },
+            {
+              "name": "ESAState",
+              "code": 2,
+              "mfgCode": null,
+              "side": "server",
+              "type": "ESAStateEnum",
+              "included": 1,
+              "storageOption": "External",
+              "singleton": 0,
+              "bounded": 0,
+              "defaultValue": null,
+              "reportable": 1,
+              "minInterval": 1,
+              "maxInterval": 65534,
+              "reportableChange": 0
+            },
+            {
+              "name": "AbsMinPower",
+              "code": 3,
+              "mfgCode": null,
+              "side": "server",
+              "type": "power_mw",
+              "included": 1,
+              "storageOption": "External",
+              "singleton": 0,
+              "bounded": 0,
+              "defaultValue": null,
+              "reportable": 1,
+              "minInterval": 1,
+              "maxInterval": 65534,
+              "reportableChange": 0
+            },
+            {
+              "name": "AbsMaxPower",
+              "code": 4,
+              "mfgCode": null,
+              "side": "server",
+              "type": "power_mw",
+              "included": 1,
+              "storageOption": "External",
+              "singleton": 0,
+              "bounded": 0,
+              "defaultValue": null,
+              "reportable": 1,
+              "minInterval": 1,
+              "maxInterval": 65534,
+              "reportableChange": 0
+            },
+            {
+              "name": "OptOutState",
+              "code": 7,
+              "mfgCode": null,
+              "side": "server",
+              "type": "OptOutStateEnum",
+              "included": 1,
+              "storageOption": "External",
+              "singleton": 0,
+              "bounded": 0,
+              "defaultValue": null,
+              "reportable": 1,
+              "minInterval": 1,
+              "maxInterval": 65534,
+              "reportableChange": 0
+            },
+            {
+              "name": "PowerRangeAdjustment",
+              "code": 8,
+              "mfgCode": null,
+              "side": "server",
+              "type": "PowerRangeAdjustStruct",
+              "included": 1,
+              "storageOption": "External",
+              "singleton": 0,
+              "bounded": 0,
+              "defaultValue": null,
+              "reportable": 1,
+              "minInterval": 1,
+              "maxInterval": 65534,
+              "reportableChange": 0
+            },
+            {
+              "name": "GeneratedCommandList",
+              "code": 65528,
+              "mfgCode": null,
+              "side": "server",
+              "type": "array",
+              "included": 1,
+              "storageOption": "External",
+              "singleton": 0,
+              "bounded": 0,
+              "defaultValue": null,
+              "reportable": 1,
+              "minInterval": 1,
+              "maxInterval": 65534,
+              "reportableChange": 0
+            },
+            {
+              "name": "AcceptedCommandList",
+              "code": 65529,
+              "mfgCode": null,
+              "side": "server",
+              "type": "array",
+              "included": 1,
+              "storageOption": "External",
+              "singleton": 0,
+              "bounded": 0,
+              "defaultValue": null,
+              "reportable": 1,
+              "minInterval": 1,
+              "maxInterval": 65534,
+              "reportableChange": 0
+            },
+            {
+              "name": "AttributeList",
+              "code": 65531,
+              "mfgCode": null,
+              "side": "server",
+              "type": "array",
+              "included": 1,
+              "storageOption": "External",
+              "singleton": 0,
+              "bounded": 0,
+              "defaultValue": null,
+              "reportable": 1,
+              "minInterval": 1,
+              "maxInterval": 65534,
+              "reportableChange": 0
+            },
+            {
+              "name": "FeatureMap",
+              "code": 65532,
+              "mfgCode": null,
+              "side": "server",
+              "type": "bitmap32",
+              "included": 1,
+              "storageOption": "External",
+              "singleton": 0,
+              "bounded": 0,
+              "defaultValue": null,
+              "reportable": 1,
+              "minInterval": 1,
+              "maxInterval": 65534,
+              "reportableChange": 0
+            },
+            {
+              "name": "ClusterRevision",
+              "code": 65533,
+              "mfgCode": null,
+              "side": "server",
+              "type": "int16u",
+              "included": 1,
+              "storageOption": "RAM",
+              "singleton": 0,
+              "bounded": 0,
+              "defaultValue": "5",
+              "reportable": 1,
+              "minInterval": 1,
+              "maxInterval": 65534,
+              "reportableChange": 0
+            }
+          ],
+          "events": [
+            {
+              "name": "PowerRangeAdjustStart",
+              "code": 4,
+              "mfgCode": null,
+              "side": "server",
+              "included": 1
+            },
+            {
+              "name": "PowerRangeAdjustEnd",
+              "code": 5,
+              "mfgCode": null,
+              "side": "server",
+              "included": 1
             }
           ]
         },

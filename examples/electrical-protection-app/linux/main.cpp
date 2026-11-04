@@ -16,6 +16,8 @@
  *    limitations under the License.
  */
 #include <AppMain.h>
+#include <EnergyManagementAppCmdLineOptions.h>
+#include <device-energy-management-stub.h>
 #include <electrical-alarm-stub.h>
 #include <electrical-distribution-stub.h>
 #include <electrical-protection-alarm-stub.h>
@@ -24,6 +26,8 @@
 #include <app-common/zap-generated/ids/Clusters.h>
 #include <app/util/attribute-storage.h>
 #include <lib/support/CodeUtils.h>
+
+#include <cstdlib>
 
 using namespace chip;
 using namespace chip::app;
@@ -43,7 +47,41 @@ const Descriptor::Structs::SemanticTagStruct::Type kBreakerTagList[] = {
     { .namespaceID = kCommonNumberNamespaceId, .tag = kNumberOneTag },
 };
 
+constexpr uint16_t kOptionFeatureMap = 0xffd1;
+
+// Device Energy Management features; --featureSet overrides.
+BitMask<DeviceEnergyManagement::Feature> sDemFeatureMap(DeviceEnergyManagement::Feature::kPowerRangeAdjustment);
+
+bool EnergyAppOptionHandler(const char * aProgram, ArgParser::OptionSet * aOptions, int aIdentifier, const char * aName,
+                            const char * aValue)
+{
+    if (aIdentifier != kOptionFeatureMap)
+    {
+        ChipLogError(Support, "%s: INTERNAL ERROR: Unhandled option: %s", aProgram, aName);
+        return false;
+    }
+    // Base 0 accepts both 0x-prefixed hex and decimal.
+    sDemFeatureMap = BitMask<DeviceEnergyManagement::Feature>(static_cast<uint32_t>(strtoul(aValue, nullptr, 0)));
+    ChipLogDetail(Support, "Using DEM FeatureMap 0x%04x", sDemFeatureMap.Raw());
+    return true;
+}
+
+ArgParser::OptionDef sEnergyAppOptionDefs[] = { { "featureSet", ArgParser::kArgumentRequired, kOptionFeatureMap }, { nullptr } };
+
+ArgParser::OptionSet sCmdLineOptions = { EnergyAppOptionHandler, sEnergyAppOptionDefs, "PROGRAM OPTIONS",
+                                         "  --featureSet <value>\n"
+                                         "       Device Energy Management FeatureMap (default 0x80, PowerRangeAdjustment).\n" };
+
 } // namespace
+
+namespace chip::app::Clusters::DeviceEnergyManagement {
+
+BitMask<Feature> GetFeatureMap()
+{
+    return sDemFeatureMap;
+}
+
+} // namespace chip::app::Clusters::DeviceEnergyManagement
 
 void ApplicationInit()
 {
@@ -73,10 +111,15 @@ void ApplicationInit()
     // test script gating on any one of them has a DUT. Each alarm-class feature exposes its own
     // threshold attribute, and ADJUST exposes SetElectricalAlarmThresholds over all of them.
     VerifyOrDie(ElectricalAlarm::ElectricalAlarmInit(kBreakerEndpointId, ElectricalAlarm::kAllFeatures) == CHIP_NO_ERROR);
+
+    // Device Energy Management lets an EMS bound the whole enclosure's power range.
+    VerifyOrDie(DeviceEnergyManagement::DeviceEnergyManagementStubInit(kEnclosureEndpointId,
+                                                                       DeviceEnergyManagement::GetFeatureMap()) == CHIP_NO_ERROR);
 }
 
 void ApplicationShutdown()
 {
+    DeviceEnergyManagement::DeviceEnergyManagementStubShutdown();
     ElectricalAlarm::ElectricalAlarmShutdown();
     ElectricalProtectionAlarm::ElectricalProtectionAlarmShutdown();
     PowerTopology::PowerTopologyShutdown();
@@ -85,7 +128,7 @@ void ApplicationShutdown()
 
 int main(int argc, char * argv[])
 {
-    if (ChipLinuxAppInit(argc, argv) != 0)
+    if (ChipLinuxAppInit(argc, argv, &sCmdLineOptions) != 0)
     {
         return -1;
     }

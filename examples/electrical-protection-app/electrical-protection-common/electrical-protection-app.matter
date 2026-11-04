@@ -1572,6 +1572,258 @@ cluster UserLabel = 65 {
   readonly attribute int16u clusterRevision = 65533;
 }
 
+/** This cluster allows a client to manage the power draw of a device. An example of such a client could be an Energy Management System (EMS) which controls an Energy Smart Appliance (ESA). */
+cluster DeviceEnergyManagement = 152 {
+  revision 5;
+
+  enum AdjustmentCauseEnum : enum8 {
+    kLocalOptimization = 0;
+    kGridOptimization = 1;
+  }
+
+  enum CauseEnum : enum8 {
+    kNormalCompletion = 0;
+    kOffline = 1;
+    kFault = 2;
+    kUserOptOut = 3;
+    kCancelled = 4;
+    kInvalid = 5;
+  }
+
+  enum CostTypeEnum : enum8 {
+    kFinancial = 0;
+    kGHGEmissions = 1;
+    kComfort = 2;
+    kTemperature = 3;
+  }
+
+  enum ESAStateEnum : enum8 {
+    kOffline = 0;
+    kOnline = 1;
+    kFault = 2;
+    kPowerAdjustActive = 3;
+    kPaused = 4;
+  }
+
+  enum ESATypeEnum : enum8 {
+    kEVSE = 0 [spec_name = "EVSE"];
+    kSpaceHeating = 1;
+    kWaterHeating = 2;
+    kSpaceCooling = 3;
+    kSpaceHeatingCooling = 4;
+    kBatteryStorage = 5;
+    kSolarPV = 6;
+    kFridgeFreezer = 7;
+    kWashingMachine = 8;
+    kDishwasher = 9;
+    kCooking = 10;
+    kHomeWaterPump = 11;
+    kIrrigationWaterPump = 12;
+    kPoolPump = 13;
+    kOther = 255;
+  }
+
+  enum ForecastUpdateReasonEnum : enum8 {
+    kInternalOptimization = 0;
+    kLocalOptimization = 1;
+    kGridOptimization = 2;
+  }
+
+  enum OptOutStateEnum : enum8 {
+    kNoOptOut = 0;
+    kLocalOptOut = 1;
+    kGridOptOut = 2;
+    kOptOut = 3;
+  }
+
+  enum PowerAdjustReasonEnum : enum8 {
+    kNoAdjustment = 0;
+    kLocalOptimizationAdjustment = 1;
+    kGridOptimizationAdjustment = 2;
+  }
+
+  bitmap Feature : bitmap32 {
+    kPowerAdjustment = 0x1;
+    kPowerForecastReporting = 0x2;
+    kStateForecastReporting = 0x4;
+    kStartTimeAdjustment = 0x8;
+    kPausable = 0x10;
+    kForecastAdjustment = 0x20;
+    kConstraintBasedAdjustment = 0x40;
+    kPowerRangeAdjustment = 0x80;
+  }
+
+  struct CostStruct {
+    CostTypeEnum costType = 0;
+    int32s value = 1;
+    int8u decimalPoints = 2;
+    optional int16u currency = 3;
+  }
+
+  struct PowerAdjustStruct {
+    power_mw minPower = 0;
+    power_mw maxPower = 1;
+    elapsed_s minDuration = 2;
+    elapsed_s maxDuration = 3;
+  }
+
+  struct PowerAdjustCapabilityStruct {
+    nullable PowerAdjustStruct powerAdjustCapability[] = 0;
+    PowerAdjustReasonEnum cause = 1;
+  }
+
+  struct SlotStruct {
+    elapsed_s minDuration = 0;
+    elapsed_s maxDuration = 1;
+    elapsed_s defaultDuration = 2;
+    elapsed_s elapsedSlotTime = 3;
+    elapsed_s remainingSlotTime = 4;
+    optional boolean slotIsPausable = 5;
+    optional elapsed_s minPauseDuration = 6;
+    optional elapsed_s maxPauseDuration = 7;
+    optional int16u manufacturerESAState = 8;
+    optional power_mw nominalPower = 9;
+    optional power_mw minPower = 10;
+    optional power_mw maxPower = 11;
+    optional energy_mwh nominalEnergy = 12;
+    optional CostStruct costs[] = 13;
+    optional power_mw minPowerAdjustment = 14;
+    optional power_mw maxPowerAdjustment = 15;
+    optional elapsed_s minDurationAdjustment = 16;
+    optional elapsed_s maxDurationAdjustment = 17;
+  }
+
+  struct ForecastStruct {
+    int32u forecastID = 0;
+    nullable int16u activeSlotNumber = 1;
+    epoch_s startTime = 2;
+    epoch_s endTime = 3;
+    optional nullable epoch_s earliestStartTime = 4;
+    optional epoch_s latestEndTime = 5;
+    boolean isPausable = 6;
+    SlotStruct slots[] = 7;
+    ForecastUpdateReasonEnum forecastUpdateReason = 8;
+  }
+
+  struct ConstraintsStruct {
+    epoch_s startTime = 0;
+    elapsed_s duration = 1;
+    optional power_mw nominalPower = 2;
+    optional energy_mwh maximumEnergy = 3;
+    optional int8s loadControl = 4;
+  }
+
+  struct PowerRangeAdjustStruct {
+    nullable power_mw minPower = 0;
+    nullable power_mw maxPower = 1;
+    PowerAdjustReasonEnum cause = 2;
+    epoch_s endTime = 3;
+  }
+
+  struct SlotAdjustmentStruct {
+    int8u slotIndex = 0;
+    optional power_mw nominalPower = 1;
+    elapsed_s duration = 2;
+  }
+
+  provisional info event PowerAdjustStart = 0 {
+  }
+
+  provisional info event PowerAdjustEnd = 1 {
+    CauseEnum cause = 0;
+    elapsed_s duration = 1;
+    energy_mwh energyUse = 2;
+  }
+
+  provisional info event Paused = 2 {
+  }
+
+  provisional info event Resumed = 3 {
+    CauseEnum cause = 0;
+  }
+
+  provisional info event PowerRangeAdjustStart = 4 {
+    PowerRangeAdjustStruct adjustment = 0;
+    elapsed_s duration = 1;
+  }
+
+  provisional info event PowerRangeAdjustEnd = 5 {
+    CauseEnum cause = 0;
+    elapsed_s duration = 1;
+    energy_mwh energyUse = 2;
+  }
+
+  readonly attribute ESATypeEnum ESAType = 0;
+  readonly attribute boolean ESACanGenerate = 1;
+  readonly attribute ESAStateEnum ESAState = 2;
+  readonly attribute power_mw absMinPower = 3;
+  readonly attribute power_mw absMaxPower = 4;
+  readonly attribute optional nullable PowerAdjustCapabilityStruct powerAdjustmentCapability = 5;
+  readonly attribute optional nullable ForecastStruct forecast = 6;
+  readonly attribute optional OptOutStateEnum optOutState = 7;
+  provisional readonly attribute optional nullable PowerRangeAdjustStruct powerRangeAdjustment = 8;
+  readonly attribute command_id generatedCommandList[] = 65528;
+  readonly attribute command_id acceptedCommandList[] = 65529;
+  readonly attribute attrib_id attributeList[] = 65531;
+  readonly attribute bitmap32 featureMap = 65532;
+  readonly attribute int16u clusterRevision = 65533;
+
+  request struct PowerAdjustRequestRequest {
+    power_mw power = 0;
+    elapsed_s duration = 1;
+    AdjustmentCauseEnum cause = 2;
+  }
+
+  request struct StartTimeAdjustRequestRequest {
+    epoch_s requestedStartTime = 0;
+    AdjustmentCauseEnum cause = 1;
+  }
+
+  request struct PauseRequestRequest {
+    elapsed_s duration = 0;
+    AdjustmentCauseEnum cause = 1;
+  }
+
+  request struct ModifyForecastRequestRequest {
+    int32u forecastID = 0;
+    SlotAdjustmentStruct slotAdjustments[] = 1;
+    AdjustmentCauseEnum cause = 2;
+  }
+
+  request struct RequestConstraintBasedForecastRequest {
+    ConstraintsStruct constraints[] = 0;
+    AdjustmentCauseEnum cause = 1;
+  }
+
+  request struct PowerRangeAdjustRequestRequest {
+    optional power_mw minPower = 0;
+    optional power_mw maxPower = 1;
+    elapsed_s duration = 2;
+    AdjustmentCauseEnum cause = 3;
+  }
+
+  /** Allows a client to request an adjustment in the power consumption of an ESA for a specified duration. */
+  command PowerAdjustRequest(PowerAdjustRequestRequest): DefaultSuccess = 0;
+  /** Allows a client to cancel an ongoing PowerAdjustmentRequest operation. */
+  command CancelPowerAdjustRequest(): DefaultSuccess = 1;
+  /** Allows a client to adjust the start time of a Forecast sequence that has not yet started operation (i.e. where the current Forecast StartTime is in the future). */
+  command StartTimeAdjustRequest(StartTimeAdjustRequestRequest): DefaultSuccess = 2;
+  /** Allows a client to temporarily pause an operation and reduce the ESAs energy demand. */
+  command PauseRequest(PauseRequestRequest): DefaultSuccess = 3;
+  /** Allows a client to cancel the PauseRequest command and enable earlier resumption of operation. */
+  command ResumeRequest(): DefaultSuccess = 4;
+  /** Allows a client to modify a Forecast within the limits allowed by the ESA. */
+  command ModifyForecastRequest(ModifyForecastRequestRequest): DefaultSuccess = 5;
+  /** Allows a client to ask the ESA to recompute its Forecast based on power and time constraints. */
+  command RequestConstraintBasedForecast(RequestConstraintBasedForecastRequest): DefaultSuccess = 6;
+  /** Allows a client to request cancellation of a previous adjustment request in a StartTimeAdjustRequest, ModifyForecastRequest or RequestConstraintBasedForecast command. */
+  command CancelRequest(): DefaultSuccess = 7;
+  /** Allows a client to request an adjustment in the range of powers that an ESA can operate within for a specified duration. */
+  command PowerRangeAdjustRequest(PowerRangeAdjustRequestRequest): DefaultSuccess = 8;
+  /** Allows a client to cancel an ongoing PowerRangeAdjustmentRequest operation. */
+  command CancelPowerRangeAdjustRequest(): DefaultSuccess = 9;
+}
+
 /** The Power Topology Cluster provides a mechanism for expressing how power is flowing between endpoints. */
 cluster PowerTopology = 156 {
   revision 2;
@@ -2099,6 +2351,7 @@ endpoint 0 {
 }
 endpoint 1 {
   device type ma_electrical_distribution_enclosure = 1303, version 1;
+  device type device_energy_management = 1293, version 3;
 
 
   server cluster Descriptor {
@@ -2111,6 +2364,26 @@ endpoint 1 {
     callback attribute attributeList;
     callback attribute featureMap;
     callback attribute clusterRevision;
+  }
+
+  server cluster DeviceEnergyManagement {
+    emits event PowerRangeAdjustStart;
+    emits event PowerRangeAdjustEnd;
+    callback attribute ESAType;
+    callback attribute ESACanGenerate;
+    callback attribute ESAState;
+    callback attribute absMinPower;
+    callback attribute absMaxPower;
+    callback attribute optOutState;
+    callback attribute powerRangeAdjustment;
+    callback attribute generatedCommandList;
+    callback attribute acceptedCommandList;
+    callback attribute attributeList;
+    callback attribute featureMap;
+    callback attribute clusterRevision;
+
+    handle command PowerRangeAdjustRequest;
+    handle command CancelPowerRangeAdjustRequest;
   }
 
   server cluster PowerTopology {

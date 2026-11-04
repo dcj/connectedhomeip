@@ -1158,7 +1158,8 @@ CHIP_ERROR DeviceEnergyManagementDelegate::SetESAType(ESATypeEnum newValue)
 {
     ESATypeEnum oldValue = mEsaType;
 
-    if (newValue >= ESATypeEnum::kUnknownEnumValue)
+    // kOther (0xFF) is valid but numerically above kUnknownEnumValue.
+    if (newValue >= ESATypeEnum::kUnknownEnumValue && newValue != ESATypeEnum::kOther)
     {
         return CHIP_IM_GLOBAL_STATUS(ConstraintError);
     }

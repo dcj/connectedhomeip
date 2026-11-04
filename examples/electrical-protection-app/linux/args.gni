@@ -29,3 +29,4 @@ matter_enable_tracing_support = true
 
 chip_enable_electrical_alarm_trigger = true
 chip_enable_electrical_protection_alarm_trigger = true
+chip_enable_device_energy_management_trigger = true
