@@ -22,6 +22,24 @@ config("includes") {
   ]
 }
 
+# The DEM test event triggers alone, without the rest of energy-management-triggers (its
+# FakeReadings needs Electrical Power Measurement). Same warnings as that target.
+source_set("dem-test-event-triggers") {
+  sources = [ "${chip_root}/examples/energy-management/energy-management-triggers/DEMTestEventTriggers.cpp" ]
+
+  include_dirs =
+      [ "${chip_root}/examples/energy-management/energy-management-triggers" ]
+
+  cflags = [ "-Wconversion" ]
+
+  deps = [
+    "${chip_root}/examples/electrical-protection-app/electrical-protection-common",
+    "${chip_root}/examples/energy-management/device-energy-management",
+    "${chip_root}/src/app",
+    "${chip_root}/src/lib",
+  ]
+}
+
 executable("chip-electrical-protection-app") {
   sources = [
     "${chip_root}/examples/electrical-protection-app/electrical-protection-common/src/device-energy-management-stub.cpp",
@@ -29,12 +47,12 @@ executable("chip-electrical-protection-app") {
     "${chip_root}/examples/electrical-protection-app/electrical-protection-common/src/electrical-distribution-stub.cpp",
     "${chip_root}/examples/electrical-protection-app/electrical-protection-common/src/electrical-protection-alarm-stub.cpp",
     "${chip_root}/examples/electrical-protection-app/electrical-protection-common/src/power-topology-stub.cpp",
-    "${chip_root}/examples/energy-management/energy-management-triggers/DEMTestEventTriggers.cpp",
     "include/CHIPProjectAppConfig.h",
     "main.cpp",
   ]
 
   deps = [
+    ":dem-test-event-triggers",
     "${chip_root}/examples/electrical-protection-app/electrical-protection-common",
     "${chip_root}/examples/energy-management/device-energy-management",
     "${chip_root}/examples/platform/linux:app-main",

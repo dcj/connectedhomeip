@@ -26,6 +26,7 @@
 #include <app-common/zap-generated/ids/Clusters.h>
 #include <app/util/attribute-storage.h>
 #include <lib/support/CodeUtils.h>
+#include <lib/support/TypeTraits.h>
 
 #include <cstdlib>
 
@@ -60,17 +61,29 @@ bool EnergyAppOptionHandler(const char * aProgram, ArgParser::OptionSet * aOptio
         ChipLogError(Support, "%s: INTERNAL ERROR: Unhandled option: %s", aProgram, aName);
         return false;
     }
-    // Base 0 accepts both 0x-prefixed hex and decimal.
-    sDemFeatureMap = BitMask<DeviceEnergyManagement::Feature>(static_cast<uint32_t>(strtoul(aValue, nullptr, 0)));
+    // Base 0 accepts both 0x-prefixed hex and decimal. The data model carries only the
+    // PowerRangeAdjustment attributes, commands and events, so no other feature set is valid.
+    char * end           = nullptr;
+    unsigned long value  = strtoul(aValue, &end, 0);
+    const uint32_t kOnly = to_underlying(DeviceEnergyManagement::Feature::kPowerRangeAdjustment);
+    if (end == aValue || *end != '\0' || value != kOnly)
+    {
+        ChipLogError(Support, "%s: --featureSet must be 0x%x (PowerRangeAdjustment), got '%s'", aProgram,
+                     static_cast<unsigned>(kOnly), aValue);
+        return false;
+    }
+    sDemFeatureMap = BitMask<DeviceEnergyManagement::Feature>(static_cast<uint32_t>(value));
     ChipLogDetail(Support, "Using DEM FeatureMap 0x%04x", sDemFeatureMap.Raw());
     return true;
 }
 
 ArgParser::OptionDef sEnergyAppOptionDefs[] = { { "featureSet", ArgParser::kArgumentRequired, kOptionFeatureMap }, { nullptr } };
 
-ArgParser::OptionSet sCmdLineOptions = { EnergyAppOptionHandler, sEnergyAppOptionDefs, "PROGRAM OPTIONS",
-                                         "  --featureSet <value>\n"
-                                         "       Device Energy Management FeatureMap (default 0x80, PowerRangeAdjustment).\n" };
+ArgParser::OptionSet sCmdLineOptions = {
+    EnergyAppOptionHandler, sEnergyAppOptionDefs, "PROGRAM OPTIONS",
+    "  --featureSet <value>\n"
+    "       Device Energy Management FeatureMap; only 0x80 (PowerRangeAdjustment, the default) is accepted.\n"
+};
 
 } // namespace
 
