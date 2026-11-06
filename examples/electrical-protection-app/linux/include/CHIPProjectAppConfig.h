@@ -41,3 +41,7 @@
 // Must fit chip::Dnssd::kKeyDeviceNameMaxLength (32) so the commissionable "DN"
 // TXT key is advertised; the full device type name would be 33 characters.
 #define CHIP_DEVICE_CONFIG_DEVICE_NAME "Electrical Protection"
+
+// TC-IDM-13.1 rejects "Test" in these names, which the SDK defaults contain.
+#define CHIP_DEVICE_CONFIG_DEVICE_VENDOR_NAME "SPAN"
+#define CHIP_DEVICE_CONFIG_DEVICE_PRODUCT_NAME "Electrical Protection"

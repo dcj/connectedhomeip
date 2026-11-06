@@ -27,8 +27,10 @@
 #include <app/util/attribute-storage.h>
 #include <lib/support/CodeUtils.h>
 #include <lib/support/TypeTraits.h>
+#include <platform/ConfigurationManager.h>
 
 #include <cstdlib>
+#include <cstring>
 
 using namespace chip;
 using namespace chip::app;
@@ -98,6 +100,11 @@ BitMask<Feature> GetFeatureMap()
 
 void ApplicationInit()
 {
+    // TC-BINFO-2.1 and TC-IDM-13.1 reject the SDK's default ManufacturingDate.
+    static constexpr char kManufacturingDate[] = "2026-01-01";
+    VerifyOrDie(DeviceLayer::ConfigurationMgr().StoreManufacturingDate(kManufacturingDate, strlen(kManufacturingDate)) ==
+                CHIP_NO_ERROR);
+
     // Electrical Distribution describes the enclosure's physical characteristics. Its generated
     // Init callback is a no-op, so the app owns the instance and registers it imperatively.
     VerifyOrDie(ElectricalDistribution::ElectricalDistributionInit(kEnclosureEndpointId) == CHIP_NO_ERROR);
